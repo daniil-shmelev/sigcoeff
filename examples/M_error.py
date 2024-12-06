@@ -3,8 +3,9 @@ import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import plotting_params
+import sigcoeff
+
 plotting_params.set_plotting_params(8, 10, 12)
-import iisignature
 from sigcoeff import compute_coeff
 from tqdm import tqdm
 
@@ -23,19 +24,13 @@ def M_error_imshow(len_x, ax, num):
         X = torch.rand((len_x, 2), dtype=torch.float64, device=device)
         idx = [0, 1] * int(dim / 2)
 
-        #############################################
-        # Get true values from iisignature
-        #############################################
-        sig = iisignature.sig(np.array(X.cpu()), dim - 1)
-
         for i in range(1, dim):
             multi_index = idx[:i]
-            level = len(multi_index)
 
-            start = iisignature.siglength(2, level - 1) if level > 1 else 0
-
-            res = sig[start: iisignature.siglength(2, level)]
-            true_ = res.reshape(tuple([2] * level))[*multi_index]
+            #############################################
+            # Get true values from chen
+            #############################################
+            true_ = sigcoeff.chen_cython(X.cpu(), multi_index)
 
             #############################################
             # Compute values for different choices of M

@@ -2,8 +2,9 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import plotting_params
+import sigcoeff
+
 plotting_params.set_plotting_params(8, 10, 12)
-import iisignature
 from sigcoeff import compute_coeff
 from tqdm import tqdm
 
@@ -56,11 +57,9 @@ if __name__ == '__main__':
             est_4[i - 1, ss] = estimate_4
 
             #############################################
-            # Get true value from iisignature
+            # Get true value from chen
             #############################################
-            res = iisignature.sig(np.array(X_.cpu()), level)
-            res = res[-dim_ ** level:]
-            true_ = res.reshape(tuple([dim_] * level))[*multi_index]
+            true_ = sigcoeff.chen_cython(X.cpu(), multi_index)
             true[i - 1, ss] = true_
 
             depth_error_2[i - 1, ss] = abs(true_ - estimate_2)
