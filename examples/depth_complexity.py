@@ -30,14 +30,14 @@ if __name__ == '__main__':
     X = X.to(device='cuda')
 
     # First call to warm up the cache
-    res = sigcoeff.cuda_serial(X, np.array([i for i in range(4)]), M=M, dyadic_order=dyadic_order)
+    res = sigcoeff.coeff_cuda_serial(X, np.array([i for i in range(4)]), dyadic_order=dyadic_order, scaling_depth=M)
     cuda.synchronize()  # Wait for cuda to finish. For timing purposes only
 
     for k in k_vals:
         multi_index = np.array([i for i in range(k)])
         start = time.time()
         for i in range(numRuns):
-            res = sigcoeff.cuda_serial(X, multi_index, M=M, dyadic_order=dyadic_order)
+            res = sigcoeff.coeff_cuda_serial(X, multi_index, dyadic_order=dyadic_order, scaling_depth=M)
             cuda.synchronize()  # Wait for cuda to finish. For timing purposes only
         end = time.time()
         print("Result: ", np.array(res.cpu()))
@@ -53,14 +53,14 @@ if __name__ == '__main__':
     X = X.to(device='cuda')
 
     # First call to warm up the cache
-    res = sigcoeff.compute_coeff(X, np.array([i for i in range(4)]), M=M, dyadic_order=dyadic_order)
+    res = sigcoeff.coeff(X, np.array([i for i in range(4)]), scaling_depth=M, dyadic_order=dyadic_order)
     cuda.synchronize() # Wait for cuda to finish. For timing purposes only
 
     for k in k_vals:
         multi_index = np.array([i for i in range(k)])
         start = time.time()
         for i in range(numRuns):
-            res = sigcoeff.compute_coeff(X, multi_index, M = M, dyadic_order = dyadic_order)
+            res = sigcoeff.coeff(X, multi_index, scaling_depth= M, dyadic_order = dyadic_order)
             cuda.synchronize() # Wait for cuda to finish. For timing purposes only
         end = time.time()
         print("Result: ", np.array(res.cpu()))
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     plt.plot(k_vals, k_time_parallel, color='darkgreen', marker = 'o')
     plt.title(r"Dependence of time complexity on coefficient depth")
     plt.grid(True, linestyle='--')
-    plt.legend([r'CUDA Serial', r'CUDA Parallel'])
+    plt.legend([r'Kernels (Serial)', r'Kernels (Parallel)'])
     plt.xlabel(r'Coefficient depth $n$')
     plt.ylabel(r'Elapsed Time (s)')
     plt.yscale("log")

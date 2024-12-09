@@ -6,7 +6,7 @@ import plotting_params
 import sigcoeff
 
 plotting_params.set_plotting_params(8, 10, 12)
-from sigcoeff import compute_coeff
+from sigcoeff import coeff
 from tqdm import tqdm
 
 def M_error_imshow(len_x, ax, num):
@@ -30,13 +30,13 @@ def M_error_imshow(len_x, ax, num):
             #############################################
             # Get true values from chen
             #############################################
-            true_ = sigcoeff.chen_cython(X.cpu(), multi_index)
+            true_ = sigcoeff.coeff_chen_cython(X.cpu(), multi_index)
 
             #############################################
             # Compute values for different choices of M
             #############################################
             for depth in range(maxdepth):
-                estimate = float(compute_coeff(X, np.array(multi_index), dyadic_order=3, M=depth))
+                estimate = float(coeff(X, np.array(multi_index), dyadic_order=3, scaling_depth=depth))
                 errmat[i - 1, depth, ss] = abs(true_ - estimate)
 
     errmat = np.mean(errmat, axis=2)

@@ -5,7 +5,7 @@ import plotting_params
 import sigcoeff
 
 plotting_params.set_plotting_params(8, 10, 12)
-from sigcoeff import compute_coeff
+from sigcoeff import coeff
 from tqdm import tqdm
 
 if __name__ == '__main__':
@@ -41,25 +41,25 @@ if __name__ == '__main__':
             #############################################
             # dyadic_order = 2
             #############################################
-            estimate_2 = float(compute_coeff(X_, np.array(multi_index), dyadic_order=2, M = M))
+            estimate_2 = float(coeff(X_, np.array(multi_index), dyadic_order=2, scaling_depth= M))
             est_2[i - 1, ss] = estimate_2
 
             #############################################
             # dyadic_order = 3
             #############################################
-            estimate_3 = float(compute_coeff(X_, np.array(multi_index), dyadic_order=3, M=M))
+            estimate_3 = float(coeff(X_, np.array(multi_index), dyadic_order=3, scaling_depth=M))
             est_3[i - 1, ss] = estimate_3
 
             #############################################
             # dyadic_order = 4
             #############################################
-            estimate_4 = float(compute_coeff(X_, np.array(multi_index), dyadic_order=4, M=M))
+            estimate_4 = float(coeff(X_, np.array(multi_index), dyadic_order=4, scaling_depth=M))
             est_4[i - 1, ss] = estimate_4
 
             #############################################
             # Get true value from chen
             #############################################
-            true_ = sigcoeff.chen_cython(X.cpu(), multi_index)
+            true_ = sigcoeff.coeff_chen_cython(X.cpu(), multi_index)
             true[i - 1, ss] = true_
 
             depth_error_2[i - 1, ss] = abs(true_ - estimate_2)

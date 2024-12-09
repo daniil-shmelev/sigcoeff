@@ -1,90 +1,95 @@
 import torch.cuda
-from mpmath import matrix
 from numba import cuda
 import numba
 
 @cuda.jit('int64(int64,int64)', fastmath = True, device = True)
-def lam_sign(n, dim):
-    # Returns 1 if n has an even number of zeros in its binary expansion and -1 otherwise
-    # dim is the length of the binary representation of n
-    count = 0
-    while n:
-        count += n & 1
-        n >>= 1
-    return 1 if (dim - count) % 2 == 0 else -1
+def lambda_sign(lambda_, dim):
+    # Returns 1 if lambda_ has an even number of zeros in its binary expansion and -1 otherwise
+    # dim is the length of the binary representation of lambda_
+    ones_count = 0
+    while lambda_:
+        ones_count += lambda_ & 1
+        lambda_ >>= 1
+    return 1 if (dim - ones_count) % 2 == 0 else -1
 
-def get_alpha(beta, M, dim, device):
+def get_alpha(beta, scaling_depth, dim, device):
     # Returns Vandermonde coefficients alpha given beta
-    out = torch.empty(M + 1, dtype = torch.float64, device = device)
-    sign = -1 if M & 1 else 1 #(-1) ** M
+    alpha_array = torch.empty(scaling_depth + 1, dtype = torch.float64, device = device)
+    sign = -1 if scaling_depth & 1 else 1 #(-1) ** scaling_depth
 
-    for i in range(M + 1):
+    for i in range(scaling_depth + 1):
         alph = sign
         alph /= beta[i] ** dim
-        for j in range(M + 1):
+        for j in range(scaling_depth + 1):
             if j == i:
                 continue
             alph *= beta[j] / (beta[i] - beta[j])
-        out[i] = alph
-    return out
+        alpha_array[i] = alph
+    return alpha_array
 
 #####################################################################
 #get_coeff_cuda, get_kernel_cuda allocate the entire PDE grid
 #####################################################################
-def get_kernel_grid_cuda(K, X, M, dyadic_order_1, dyadic_order_2, len_x, dim, lam_lim, dyadic_len, dyadic_dim, full = False):
+def get_kernel_grid_cuda(pde_grid, path, scaling_depth, dyadic_order_1, dyadic_order_2, dim, max_lambda, dyadic_len, dyadic_dim, full = False):
     # Populates PDE grid K of shape (M + 1, lam_lim, dyadic_len, dyadic_dim + 1)
 
     # Assign initial values
-    K[:, :, 0, :] = 1.
-    K[:, :, :, 0] = 1.
+    pde_grid[:, :, 0, :] = 1.
+    pde_grid[:, :, :, 0] = 1.
 
     # Compute beta and alpha for Vandermonde
-    beta = torch.linspace(0.1, 1, M + 1, dtype=torch.float64, device='cuda') if M > 0 else torch.ones(1, dtype=torch.float64, device='cuda')
-    alpha = get_alpha(beta, M, dim, 'cuda')
+    beta = torch.linspace(0.1, 1, scaling_depth + 1, dtype=torch.float64, device='cuda') if scaling_depth > 0 else torch.ones(1, dtype=torch.float64, device='cuda')
+    alpha = get_alpha(beta, scaling_depth, dim, 'cuda')
 
     # Total number of antidiagonals
-    n_anti_diag = dyadic_len + dyadic_dim
+    num_anti_diag = dyadic_len + dyadic_dim
 
     # Populate grid
-    get_kernel_cuda[(M + 1, lam_lim), dyadic_dim,](K, X, alpha, beta, dim, dyadic_dim, dyadic_len, n_anti_diag, dyadic_order_1, dyadic_order_2, full)
+    get_kernel_cuda[(scaling_depth + 1, max_lambda), dyadic_dim,](pde_grid, path, alpha, beta, dim, dyadic_dim, dyadic_len, num_anti_diag, dyadic_order_1, dyadic_order_2, full)
 
-def get_coeff_cuda(X, M, dyadic_order_1, dyadic_order_2, full = False):
-    len_x = X.shape[0]
-    dim = X.shape[1]
-    lam_lim = 1 << dim
+def get_coeff_cuda(path, scaling_depth, dyadic_order_1, dyadic_order_2, full = False):
+
+    path_length = path.shape[0]
+    dim = path.shape[1]
+
+    # In the method, lambda represents a component-wise scaling. In the case of a central difference,
+    # lambda is a vector in {-1,1}^dim. We choose to represent this vector as an integer, whose binary
+    # representation denotes the entries of the vector. For example, 5 = (1,0,1)_2 corresponds to the
+    # vector (1, -1, 1). max_lambda here denotes the upper bound for these integers.
+    max_lambda = 1 << dim
 
     # Dyadically refined grid dimensions
-    dyadic_len = ((len_x - 1) << dyadic_order_1) + 1
+    dyadic_len = ((path_length - 1) << dyadic_order_1) + 1
     dyadic_dim = (dim << dyadic_order_2)
 
     # Allocate PDE grids
-    K = torch.empty((M + 1, lam_lim, dyadic_len, dyadic_dim + 1), dtype=torch.float64, device='cuda')
+    pde_grid = torch.empty((scaling_depth + 1, max_lambda, dyadic_len, dyadic_dim + 1), dtype=torch.float64, device='cuda')
 
     # Populate PDE grids
-    get_kernel_grid_cuda(K, X, M, dyadic_order_1, dyadic_order_2, len_x, dim, lam_lim, dyadic_len, dyadic_dim, full)
+    get_kernel_grid_cuda(pde_grid, path, scaling_depth, dyadic_order_1, dyadic_order_2, dim, max_lambda, dyadic_len, dyadic_dim, full)
 
     # Sum as necessary
     if full:
-        res = torch.empty((len_x, dim), dtype=torch.float64, device='cuda')
+        result = torch.empty((path_length, dim), dtype=torch.float64, device='cuda')
         for i in range(dim, 0, -1):
-            res[:, i - 1] = torch.sum(K[:, :(1 << i), ::(1 << dyadic_order_1), i << dyadic_order_2], dim=(0, 1)) * (0.5 ** i)
-        return res
+            result[:, i - 1] = torch.sum(pde_grid[:, :(1 << i), ::(1 << dyadic_order_1), i << dyadic_order_2], dim=(0, 1)) * (0.5 ** i)
+        return result
     else:
-        res = torch.sum(K[:, :, -1, -1])
-        return res * (0.5 ** dim)
+        result = torch.sum(pde_grid[:, :, -1, -1])
+        return result * (0.5 ** dim)
 
 @cuda.jit('void(float64[:,:,:,:],float64[:,:],float64[:],float64[:],int64,int64,int64,int64,int64,int64,boolean)', fastmath = True)
-def get_kernel_cuda(K, X, alpha_arr, beta_arr, dim, dyadic_dim, dyadic_len, n_anti_diag, dyadic_order_1, dyadic_order_2, full):
-    # Each block corresponds to a single (beta, lam) pair.
+def get_kernel_cuda(pde_grid, path, alpha_arr, beta_arr, dim, dyadic_dim, dyadic_len, num_anti_diag, dyadic_order_1, dyadic_order_2, full):
+    # Each block corresponds to a single (beta, lambda_) pair.
     M_idx = int(cuda.blockIdx.x)
-    lam = int(cuda.blockIdx.y)
+    lambda_ = int(cuda.blockIdx.y)
     # Each thread works on a node of a diagonal.
     thread_id = int(cuda.threadIdx.x)
 
     beta_frac = beta_arr[M_idx] / (1 << (dyadic_order_1 + dyadic_order_2))
     twelth = 1. / 12
 
-    for p in range(2, n_anti_diag):  # First two antidiagonals are initialised to 1
+    for p in range(2, num_anti_diag):  # First two antidiagonals are initialised to 1
         start_j = max(1, p - dyadic_len + 1)
         end_j = min(p, dyadic_dim + 1)
 
@@ -96,14 +101,14 @@ def get_kernel_cuda(K, X, alpha_arr, beta_arr, dim, dyadic_dim, dyadic_len, n_an
             i = p - j  # Calculate corresponding i (since i + j = p)
             ii = ((i - 1) >> dyadic_order_1) + 1
 
-            if lam & (1 << d):
-                deriv = beta_frac * (X[ii, d] - X[ii - 1, d])
+            if lambda_ & (1 << d):
+                deriv = beta_frac * (path[ii, d] - path[ii - 1, d])
             else:
-                deriv = beta_frac * (X[ii - 1, d] - X[ii, d])
+                deriv = beta_frac * (path[ii - 1, d] - path[ii, d])
 
             deriv_2 = deriv * deriv * twelth
-            K[M_idx, lam, i, j] = (K[M_idx, lam, i, j - 1] + K[M_idx, lam, i - 1, j]) * (
-                    1. + 0.5 * deriv + deriv_2) - K[M_idx, lam, i - 1, j - 1] * (1. - deriv_2)
+            pde_grid[M_idx, lambda_, i, j] = (pde_grid[M_idx, lambda_, i, j - 1] + pde_grid[M_idx, lambda_, i - 1, j]) * (
+                    1. + 0.5 * deriv + deriv_2) - pde_grid[M_idx, lambda_, i - 1, j - 1] * (1. - deriv_2)
 
         # Wait for other threads in this block
         cuda.syncthreads()
@@ -113,52 +118,57 @@ def get_kernel_cuda(K, X, alpha_arr, beta_arr, dim, dyadic_dim, dyadic_len, n_an
         if thread_id < dim:
             j = thread_id + 1
             dim_idx = j << dyadic_order_2
-            fact = lam_sign(lam, j) * alpha_arr[M_idx] * (beta_arr[M_idx] ** (dim - j))
+            fact = lambda_sign(lambda_, j) * alpha_arr[M_idx] * (beta_arr[M_idx] ** (dim - j))
             for i in range(0, dyadic_len, 1 << dyadic_order_1):
-                K[M_idx, lam, i, dim_idx] -= 1
-                K[M_idx, lam, i, dim_idx] *= fact
+                pde_grid[M_idx, lambda_, i, dim_idx] -= 1
+                pde_grid[M_idx, lambda_, i, dim_idx] *= fact
     else:
         if thread_id == 0:
-            K[M_idx, lam, -1, -1] -= 1
-            K[M_idx, lam, -1, -1] *= lam_sign(lam, dim) * alpha_arr[M_idx]
+            pde_grid[M_idx, lambda_, -1, -1] -= 1
+            pde_grid[M_idx, lambda_, -1, -1] *= lambda_sign(lambda_, dim) * alpha_arr[M_idx]
 
 
 #####################################################################
 #get_coeff_cuda_2, get_kernel_cuda_2 allocate only the required 3 anti-diagonals
 #These are preferred in the single coefficient case for memory efficiency
 #####################################################################
-def get_coeff_cuda_2(X, M, dyadic_order_1, dyadic_order_2):
-    len_x = X.shape[0]
-    dim = X.shape[1]
-    lam_lim = 1 << dim
+def get_coeff_cuda_2(path, scaling_depth, dyadic_order_1, dyadic_order_2):
+    path_length = path.shape[0]
+    dim = path.shape[1]
+
+    # In the method, lambda represents a component-wise scaling. In the case of a central difference,
+    # lambda is a vector in {-1,1}^dim. We choose to represent this vector as an integer, whose binary
+    # representation denotes the entries of the vector. For example, 5 = (1,0,1)_2 corresponds to the
+    # vector (1, -1, 1). max_lambda here denotes the upper bound for these integers.
+    max_lambda = 1 << dim
 
     # Dyadically refined grid dimensions
-    dyadic_len = ((len_x - 1) << dyadic_order_1) + 1
+    dyadic_len = ((path_length - 1) << dyadic_order_1) + 1
     dyadic_dim = (dim << dyadic_order_2)
 
     # Allocate array to store results
-    results = torch.empty((M+1, lam_lim), dtype=torch.float64, device = 'cuda') #Container for results of kernel evaluations
+    results = torch.empty((scaling_depth + 1, max_lambda), dtype=torch.float64, device ='cuda') #Container for results of kernel evaluations
 
     # Get beta and alpha for Vandermonde
-    beta = torch.linspace(0.1, 1, M + 1, dtype=torch.float64, device = 'cuda') if M > 0 else torch.ones(1, dtype=torch.float64, device = 'cuda')
-    alpha = get_alpha(beta, M, dim, 'cuda')
+    beta = torch.linspace(0.1, 1, scaling_depth + 1, dtype=torch.float64, device ='cuda') if scaling_depth > 0 else torch.ones(1, dtype=torch.float64, device ='cuda')
+    alpha = get_alpha(beta, scaling_depth, dim, 'cuda')
 
     #Total number of antidiagonals
-    n_anti_diag = dyadic_len + dyadic_dim
+    num_anti_diag = dyadic_len + dyadic_dim
 
     # Populate results
     sharedmem = 24 * (dyadic_dim + 1)
-    get_kernel_cuda_2[(M + 1, lam_lim), dyadic_dim, 0, sharedmem](results, X, alpha, beta, dim, dyadic_len, dyadic_dim, n_anti_diag, dyadic_order_1, dyadic_order_2)
+    get_kernel_cuda_2[(scaling_depth + 1, max_lambda), dyadic_dim, 0, sharedmem](results, path, alpha, beta, dim, dyadic_len, dyadic_dim, num_anti_diag, dyadic_order_1, dyadic_order_2)
 
     # Sum and scale
-    res = torch.sum(results)
-    return res * (0.5 ** dim)
+    result = torch.sum(results)
+    return result * (0.5 ** dim)
 
 @cuda.jit('void(float64[:,:],float64[:,:],float64[:],float64[:],int64,int64,int64,int64,int64,int64)', fastmath = True)
-def get_kernel_cuda_2(results, X, alpha_arr, beta_arr, dim, dyadic_len, dyadic_dim, n_anti_diag, dyadic_order_1, dyadic_order_2):
-    # Each block corresponds to a single (beta, lam) pair.
+def get_kernel_cuda_2(results, path, alpha_arr, beta_arr, dim, dyadic_len, dyadic_dim, n_anti_diag, dyadic_order_1, dyadic_order_2):
+    # Each block corresponds to a single (beta, lambda_) pair.
     M_idx = int(cuda.blockIdx.x)
-    lam = int(cuda.blockIdx.y)
+    lambda_ = int(cuda.blockIdx.y)
     # Each thread works on a node of a diagonal.
     thread_id = int(cuda.threadIdx.x)
 
@@ -198,10 +208,10 @@ def get_kernel_cuda_2(results, X, alpha_arr, beta_arr, dim, dyadic_len, dyadic_d
             i = p - j  # Calculate corresponding i (since i + j = p)
             ii = ((i - 1) >> dyadic_order_1) + 1
 
-            if lam & (1 << d):
-                deriv = beta_frac * (X[ii, d] - X[ii - 1, d])
+            if lambda_ & (1 << d):
+                deriv = beta_frac * (path[ii, d] - path[ii - 1, d])
             else:
-                deriv = beta_frac * (X[ii - 1, d] - X[ii, d])
+                deriv = beta_frac * (path[ii - 1, d] - path[ii, d])
 
             deriv_2 = deriv * deriv * twelth
 
@@ -222,87 +232,92 @@ def get_kernel_cuda_2(results, X, alpha_arr, beta_arr, dim, dyadic_len, dyadic_d
 
     #Add results
     if thread_id == 0:
-        results[M_idx, lam] = lam_sign(lam, dim) * alpha_arr[M_idx] * (shared_memory[prev_diag_idx + dyadic_dim] - 1)
+        results[M_idx, lambda_] = lambda_sign(lambda_, dim) * alpha_arr[M_idx] * (shared_memory[prev_diag_idx + dyadic_dim] - 1)
 
 #####################################################################
 # A serial implementation on CUDA for an apples-to-apples comparison
 # For timing purposes only
 #####################################################################
-def get_coeff_cuda_serial(X, M, dyadic_order_1, dyadic_order_2):
-    len_x = X.shape[0]
-    dim = X.shape[1]
-    lam_lim = 1 << dim
-    res = 0
+def get_coeff_cuda_serial(path, scaling_depth, dyadic_order_1, dyadic_order_2):
+    path_length = path.shape[0]
+    dim = path.shape[1]
+
+    # In the method, lambda represents a component-wise scaling. In the case of a central difference,
+    # lambda is a vector in {-1,1}^dim. We choose to represent this vector as an integer, whose binary
+    # representation denotes the entries of the vector. For example, 5 = (1,0,1)_2 corresponds to the
+    # vector (1, -1, 1). max_lambda here denotes the upper bound for these integers.
+    max_lambda = 1 << dim
+    result = 0
 
     # Dyadically refined grid dimensions
-    dyadic_len = ((len_x - 1) << dyadic_order_1) + 1
+    dyadic_len = ((path_length - 1) << dyadic_order_1) + 1
     dyadic_dim = (dim << dyadic_order_2) + 1
 
-    beta = torch.linspace(0.1, 1, M + 1, dtype=torch.float64, device='cuda') if M > 0 else torch.ones(1, dtype=torch.float64, device='cuda')
-    alpha = get_alpha(beta, M, dim, 'cuda')
+    beta = torch.linspace(0.1, 1, scaling_depth + 1, dtype=torch.float64, device='cuda') if scaling_depth > 0 else torch.ones(1, dtype=torch.float64, device='cuda')
+    alpha = get_alpha(beta, scaling_depth, dim, 'cuda')
 
-    K = torch.empty((dyadic_len, dyadic_dim), dtype = torch.float64, device = "cuda")
+    pde_grid = torch.empty((dyadic_len, dyadic_dim), dtype = torch.float64, device = "cuda")
 
-    for lam in range(lam_lim):
-        for i in range(M + 1):
-            get_kernel_cuda_serial[1,1](K, X, lam, beta[i], alpha[i], dyadic_order_1, dyadic_order_2)
-            res += K[-1,-1]
+    for lambda_ in range(max_lambda):
+        for i in range(scaling_depth + 1):
+            get_kernel_cuda_serial[1,1](pde_grid, path, lambda_, beta[i], alpha[i], dyadic_order_1, dyadic_order_2)
+            result += pde_grid[-1,-1]
 
-    res *= 0.5 ** dim
-    return res
+    result *= 0.5 ** dim
+    return result
 
 @cuda.jit('void(float64[:,:], float64[:,:],int64,float64,float64,int64,int64)', fastmath = True)
-def get_kernel_cuda_serial(K, X, lam, beta, alpha, dyadic_order_1, dyadic_order_2):
-    len_x = X.shape[0]
-    dim = X.shape[1]
+def get_kernel_cuda_serial(pde_grid, path, lambda_, beta, alpha, dyadic_order_1, dyadic_order_2):
+    path_length = path.shape[0]
+    dim = path.shape[1]
     beta_frac = beta / (1 << (dyadic_order_1 + dyadic_order_2))
     twelth = 1. / 12
 
     # Dyadically refined grid dimensions
-    dyadic_len = ((len_x - 1) << dyadic_order_1) + 1
+    dyadic_len = ((path_length - 1) << dyadic_order_1) + 1
     dyadic_dim = (dim << dyadic_order_2) + 1
 
     # Initialization of K array
     for i in range(dyadic_len):
-        K[i, 0] = 1.0
+        pde_grid[i, 0] = 1.0
 
     for j in range(dyadic_dim):
-        K[0, j] = 1.0
+        pde_grid[0, j] = 1.0
 
     for j in range(dyadic_dim - 1):
         d = j >> dyadic_order_2
         for i in range(dyadic_len - 1):
             ii = i >> dyadic_order_1
 
-            if lam & (1 << d):
-                deriv = beta_frac * (X[ii + 1, d] - X[ii, d])
+            if lambda_ & (1 << d):
+                deriv = beta_frac * (path[ii + 1, d] - path[ii, d])
             else:
-                deriv = beta_frac * (X[ii, d] - X[ii + 1, d])
+                deriv = beta_frac * (path[ii, d] - path[ii + 1, d])
 
             deriv_2 = deriv * deriv * twelth
-            K[i + 1, j + 1] = (
-                    (K[i + 1, j] + K[i, j + 1])
+            pde_grid[i + 1, j + 1] = (
+                    (pde_grid[i + 1, j] + pde_grid[i, j + 1])
                     * (1.0 + 0.5 * deriv + deriv_2)
-                    - K[i, j] * (1.0 - deriv_2)
+                    - pde_grid[i, j] * (1.0 - deriv_2)
             )
-    K[dyadic_len - 1, dyadic_dim - 1] -= 1
-    K[dyadic_len - 1, dyadic_dim - 1] *= lam_sign(lam, dim) * alpha
+    pde_grid[dyadic_len - 1, dyadic_dim - 1] -= 1
+    pde_grid[dyadic_len - 1, dyadic_dim - 1] *= lambda_sign(lambda_, dim) * alpha
 
 #####################################################################
 # An implementation of Chen's relation for an apples-to-apples comparison
 #####################################################################
-def chen_cuda_(X):
-    dim = X.shape[1]
+def chen_cuda_(path):
+    dim = path.shape[1]
     sharedmem = 16 * (dim + 1)
     result = torch.empty(1, dtype = torch.float64, device = "cuda")
-    run_chen_cuda[1, dim, 0, sharedmem](X, result)
+    run_chen_cuda[1, dim, 0, sharedmem](path, result)
     return result
 
 @cuda.jit('void(double[:,:], double[:])', fastmath = True)
-def run_chen_cuda(X, result):
+def run_chen_cuda(path, result):
     thread_id = int(cuda.threadIdx.x)
-    dim = X.shape[1]
-    L = X.shape[0]
+    dim = path.shape[1]
+    path_length = path.shape[0]
 
     shared_memory = cuda.shared.array(shape=0, dtype=numba.float64)
 
@@ -317,17 +332,17 @@ def run_chen_cuda(X, result):
     # Compute coefficients for the first linear segment
     fact_prod = 1.
     for i in range(1, dim + 1):
-        fact_prod *= (X[1, i - 1] - X[0, i - 1]) / i
+        fact_prod *= (path[1, i - 1] - path[0, i - 1]) / i
         shared_memory[last_coeffs_idx + i] = fact_prod  # prod / factorial(i)
 
-    for LL in range(1, L - 1):
+    for LL in range(1, path_length - 1):
         for ii in range(dim):
             i = ii+1
             shared_memory[new_coeffs_idx + i] = shared_memory[last_coeffs_idx + i]
 
             fact_prod = 1.
             for k in range(i-1, -1, -1):
-                fact_prod *= (X[LL + 1, k] - X[LL, k]) / (i - k)
+                fact_prod *= (path[LL + 1, k] - path[LL, k]) / (i - k)
                 shared_memory[new_coeffs_idx + i] += shared_memory[last_coeffs_idx + k] * fact_prod
 
         new_coeffs_idx, last_coeffs_idx = last_coeffs_idx, new_coeffs_idx

@@ -19,43 +19,43 @@ import sigcoeff
 
 torch.manual_seed(42)
 
-#Underlying path
+# Underlying path
 len_x = 1000
 dim = 10
-X = torch.rand((len_x, dim), device = "cpu")
+X = torch.rand((len_x, dim), device="cpu")
 
-#Target multi-index
-multi_index = [1,5,2,6,3]
+# Target multi-index
+multi_index = [1, 5, 2, 6, 3]
 
-#Algorithm parameters
+# Algorithm parameters
 M = 2
 dyadic_order = 3
 
 #############################################
 # Serial CPU computation
 #############################################
-coeff = sigcoeff.compute_coeff(X, multi_index, M = M, dyadic_order = dyadic_order, parallel = False)
+coeff = sigcoeff.coeff(X, multi_index, scaling_depth=M, dyadic_order=dyadic_order, parallel=False)
 
 #############################################
 # Parallel CPU computation
 #############################################
-coeff = sigcoeff.compute_coeff(X, multi_index, M=M, dyadic_order=dyadic_order, parallel=True)
+coeff = sigcoeff.coeff(X, multi_index, scaling_depth=M, dyadic_order=dyadic_order, parallel=True)
 
 #############################################
 # Parallel GPU computation
 #############################################
-coeff = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=dyadic_order)
+coeff = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=dyadic_order)
 
 #############################################
 # Varying dyadic orders for the two dimensions of the PDE grid
 #############################################
-coeff = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=(3,2))
+coeff = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=(3, 2))
 
 #############################################
 # Extraction of the entire grid of coefficients. I.e. all coefficients given by multi_index[:i],
 # evaluated at all time points up to len_x. (CUDA only)
 #############################################
-coeff_grid = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=dyadic_order, full = True)
+coeff_grid = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=dyadic_order, full=True)
 ```
 
 ## Citation

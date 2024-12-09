@@ -32,7 +32,7 @@ if __name__ == '__main__':
         multi_index = np.array([i for i in range(k)])
         start = time.time()
         for i in range(numRuns):
-            res = sigcoeff.chen_cuda(X, multi_index)
+            res = sigcoeff.coeff_chen_cuda(X, multi_index)
             cuda.synchronize()  # Wait for cuda to finish. For timing purposes only
         end = time.time()
         print("Result: ", np.array(res))
@@ -48,14 +48,14 @@ if __name__ == '__main__':
     X = X.to(device='cuda')
 
     # First call to warm up the cache
-    res = sigcoeff.compute_coeff(X, np.array([i for i in range(7)]), M=M, dyadic_order=dyadic_order)
+    res = sigcoeff.coeff(X, np.array([i for i in range(7)]), scaling_depth=M, dyadic_order=dyadic_order)
     cuda.synchronize() # Wait for cuda to finish. For timing purposes only
 
     for k in k_vals:
         multi_index = np.array([i for i in range(k)])
         start = time.time()
         for i in range(numRuns):
-            res = sigcoeff.compute_coeff(X, multi_index, M = M, dyadic_order = dyadic_order)
+            res = sigcoeff.coeff(X, multi_index, scaling_depth= M, dyadic_order = dyadic_order)
             cuda.synchronize() # Wait for cuda to finish. For timing purposes only
         end = time.time()
         print("Result: ", np.array(res.cpu()))
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     plt.plot(k_vals, np.array(k_time_kernels) , color='darkgreen', marker = 'o')
     plt.title(r"Dependence of time complexity on coefficient depth")
     plt.grid(True, linestyle='--')
-    plt.legend([r'Chen (CUDA)', r'Kernels (CUDA)', r'CUDA'])
+    plt.legend([r'Chen (Serial)', r'Kernels (Parallel)'])
     plt.xlabel(r'Coefficient depth $n$')
     plt.ylabel(r'Elapsed Time (s)')
     plt.tight_layout()

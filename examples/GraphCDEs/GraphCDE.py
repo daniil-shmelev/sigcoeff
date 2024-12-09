@@ -191,14 +191,14 @@ class GraphCDE:
             for walk in self.walks:
                 multi_index = self.walk_to_index(walk)
                 if multi_index not in self.coeffs.keys():
-                    self.coeffs[multi_index] = float(sigcoeff.compute_coeff(x_segment, multi_index, self.dyadic_order, self.M))
+                    self.coeffs[multi_index] = float(sigcoeff.coeff(x_segment, multi_index, self.dyadic_order, self.M))
 
         else:
             for walk in self.walks[::-1]: #step backwards to fill longest walk first
                 multi_index = self.walk_to_index(walk)
                 if multi_index not in self.coeffs.keys():
                     # Compute FULL array of sigcoeffs and populate all relevant walks.
-                    res = sigcoeff.compute_coeff(x_segment, multi_index, self.dyadic_order, self.M, mode = "full")[-1,:].cpu()
+                    res = sigcoeff.coeff(x_segment, multi_index, self.dyadic_order, self.M, mode ="full")[-1, :].cpu()
                     for i in range(1, len(multi_index) + 1):
                         self.coeffs[multi_index[:i]] = float(res[i-1])
 

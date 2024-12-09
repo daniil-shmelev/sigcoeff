@@ -4,36 +4,37 @@ import torch
 import warnings
 from numba import NumbaPerformanceWarning
 
-def reorder_path(X, multi_index):
-    # Retrieves the path x^multi_index
-    len_x = X.shape[0]
+def reorder_path(path, multi_index):
+    # Retrieves the path x^{multi_index}
+    path_length = path.shape[0]
     new_dim = len(multi_index)
-    new_X = torch.empty((len_x, new_dim), dtype=torch.double, device = X.device)
+    new_path = torch.empty((path_length, new_dim), dtype=torch.double, device = path.device)
     for i in range(new_dim):
-        new_X[:, i] = X[:, multi_index[i]]
-    return new_X
+        new_path[:, i] = path[:, multi_index[i]]
+    return new_path
 
-def compute_coeff(X, multi_index, dyadic_order = 2, M = 2, parallel = True, scale = True, full = False):
+def coeff(path, multi_index, dyadic_order = 2, scaling_depth = 2, parallel = True, normalise = True, full = False):
     """
     Computes the signature coefficient S(X)^{multi_index} using the kernel approach.
 
-    :param X: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
+    :param path: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
     :param multi_index: Array-like multi-index of signature coefficient to compute. If full = True this is the terminal multi-index in the grid.
     :param dyadic_order: int or 2-tuple. If int, dyadic order is taken to be the same over both dimensions of the PDE grid. Otherwise, dyadic orders taken from tuple (dyadic_order_len, dyadic_order_dim).
-    :param M: Vandermonde scaling depth.
+    :param scaling_depth: Vandermonde scaling depth.
     :param parallel: If true, computes in parallel when using cpu. This parameter is ignored if X.device = "cuda".
-    :param scale: If true, pre-scales X by max(abs(X)) before computing coefficient. Can improve performance for paths taking large values.
+    :param normalise: If true, pre-scales X by max(abs(X)) before computing coefficient. Can improve performance for paths taking large values.
     :param full: If true, returns the full grid of signature coefficients of shape (path length, multi-index length).
     :return: torch.Tensor
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=NumbaPerformanceWarning)
-        return compute_coeff_(X, multi_index, dyadic_order, M, parallel, scale, full)
+        return coeff_(path, multi_index, dyadic_order, scaling_depth, parallel, normalise, full)
 
 
-def compute_coeff_(X, multi_index, dyadic_order = 2, M = 2, parallel = True, scale = True, full = False):
-    multi_index_ = list(multi_index)
-    dim = len(multi_index_)
+def coeff_(path, multi_index, dyadic_order = 2, scaling_depth = 2, parallel = True, normalise = True, full = False):
+    _multi_index = list(multi_index)
+    dim = len(_multi_index)
+    path_length = path.shape[0]
 
     if type(dyadic_order) == int:
         dyadic_order_1, dyadic_order_2 = dyadic_order, dyadic_order
@@ -42,64 +43,65 @@ def compute_coeff_(X, multi_index, dyadic_order = 2, M = 2, parallel = True, sca
     else:
         raise ValueError("dyadic_order must by int or tuple of length 2")
 
-    # if len(multi_index_) == 1:
-    #     return X[-1, multi_index_[0]] - X[0, multi_index_[0]]
+    # It is obviously better to return the increment in the dim = 1 case as below,
+    # but we ignore this here for consistency of results.
+    # if len(_multi_index) == 1:
+    #     return X[-1, _multi_index[0]] - X[0, _multi_index[0]]
 
-    if X.shape[0] < 2 or X.shape[1] < 1:
+    if path_length < 2 or dim < 1:
         return torch.tensor(0.)
 
-    new_X = reorder_path(X, multi_index_)
+    path_at_multi_index = reorder_path(path, _multi_index)
 
-    if scale:
-        scaling = torch.max(torch.abs(X))
-        new_X /= scaling
+    if normalise:
+        scaling = torch.max(torch.abs(path))
+        path_at_multi_index /= scaling
 
-    if X.device.type == "cpu":
+    if path.device.type == "cpu":
         if not full:
-            res = get_coeff_cython(new_X.numpy(), M, dyadic_order_1, dyadic_order_2, parallel)
+            result = get_coeff_cython(path_at_multi_index.numpy(), scaling_depth, dyadic_order_1, dyadic_order_2, parallel)
         else:
             raise ValueError("full = True not supported with cpu")
     else:
         if full:
-            res = get_coeff_cuda(new_X.cuda(), M, dyadic_order_1, dyadic_order_2, full = True)
+            result = get_coeff_cuda(path_at_multi_index.cuda(), scaling_depth, dyadic_order_1, dyadic_order_2, full = True)
         else:
             #get_coeff_cuda_2 does not store the grid so is more memory efficient if we're only interested in one coefficient
-            res = get_coeff_cuda_2(new_X.cuda(), M, dyadic_order_1, dyadic_order_2)
+            result = get_coeff_cuda_2(path_at_multi_index.cuda(), scaling_depth, dyadic_order_1, dyadic_order_2)
 
-    if scale:
+    if normalise:
         if full:
             scaling_pow = float(scaling)
             for i in range(1, dim + 1):
-                res[:, i - 1] *= scaling_pow
+                result[:, i - 1] *= scaling_pow
                 scaling_pow *= scaling
         else:
-            res *= scaling ** dim
+            result *= scaling ** dim
 
-    return res
+    return result
 
-def cuda_serial(X, multi_index, dyadic_order = 2, M = 2, parallel = True, scale = True, full = False):
+def coeff_cuda_serial(path, multi_index, dyadic_order=2, scaling_depth=2, normalise=True):
     """
     For timing purposes only. A serial implementation on CUDA for an apples-to-apples comparison.
 
-    :param X: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
+    :param path: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
     :param multi_index: Array-like multi-index of signature coefficient to compute. If full = True this is the terminal multi-index in the grid.
     :param dyadic_order: int or 2-tuple. If int, dyadic order is taken to be the same over both dimensions of the PDE grid. Otherwise, dyadic orders taken from tuple (dyadic_order_len, dyadic_order_dim).
-    :param M: Vandermonde scaling depth.
-    :param parallel: If true, computes in parallel when using cpu. This parameter is ignored if X.device = "cuda".
-    :param scale: If true, pre-scales X by max(abs(X)) before computing coefficient. Can improve performance for paths taking large values.
-    :param full: If true, returns the full grid of signature coefficients of shape (path length, multi-index length).
+    :param scaling_depth: Vandermonde scaling depth.
+    :param normalise: If true, pre-scales X by max(abs(X)) before computing coefficient. Can improve performance for paths taking large values.
     :return: torch.Tensor
     """
-    if X.device == "cpu":
+    if path.device == "cpu":
         raise ValueError("X not on CUDA in cuda_serial")
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=NumbaPerformanceWarning)
-        return cuda_serial_(X, multi_index, dyadic_order, M, parallel, scale, full)
+        return _coeff_cuda_serial(path, multi_index, dyadic_order, scaling_depth, normalise)
 
-def cuda_serial_(X, multi_index, dyadic_order = 2, M = 2, parallel = True, scale = True, full = False):
-    multi_index_ = list(multi_index)
-    dim = len(multi_index_)
+def _coeff_cuda_serial(path, multi_index, dyadic_order=2, scaling_depth=2, normalise=True):
+    _multi_index = list(multi_index)
+    dim = len(_multi_index)
+    path_length = path.shape[0]
 
     if type(dyadic_order) == int:
         dyadic_order_1, dyadic_order_2 = dyadic_order, dyadic_order
@@ -108,51 +110,54 @@ def cuda_serial_(X, multi_index, dyadic_order = 2, M = 2, parallel = True, scale
     else:
         raise ValueError("dyadic_order must by int or tuple of length 2")
 
-    # if len(multi_index_) == 1:
-    #     return X[-1, multi_index_[0]] - X[0, multi_index_[0]]
+    # It is obviously better to return the increment in the dim = 1 case as below,
+    # but we ignore this here for consistency of results.
+    # if len(_multi_index) == 1:
+    #     return X[-1, _multi_index[0]] - X[0, _multi_index[0]]
 
-    if X.shape[0] < 2 or X.shape[1] < 1:
+    if path_length < 2 or path.shape[1] < 1:
         return torch.tensor(0.)
 
-    new_X = reorder_path(X, multi_index_)
+    path_at_multi_index = reorder_path(path, _multi_index)
 
-    if scale:
-        scaling = torch.max(torch.abs(X))
-        new_X /= scaling
+    if normalise:
+        scaling = torch.max(torch.abs(path))
+        path_at_multi_index /= scaling
 
-    res = get_coeff_cuda_serial(new_X.cuda(), M, dyadic_order_1, dyadic_order_2)
+    result = get_coeff_cuda_serial(path_at_multi_index.cuda(), scaling_depth, dyadic_order_1, dyadic_order_2)
 
-    if scale:
-        res *= scaling ** dim
+    if normalise:
+        result *= scaling ** dim
 
-    return res
+    return result
 
-def chen_cython(X, multi_index):
+def coeff_chen_cython(path, multi_index):
     """
     Computes the signature coefficient S(X)^{multi_index} using Chen's relation, computed with Cython.
 
-    :param X: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
+    :param path: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
     :param multi_index: Array-like multi-index of signature coefficient to compute
     :return: double
     """
-    multi_index_ = list(multi_index)
-    new_X = reorder_path(X, multi_index_)
-    return chen_(new_X.numpy())
+    _multi_index = list(multi_index)
+    path_at_multi_index = reorder_path(path, _multi_index)
+    return chen_(path_at_multi_index.numpy())
 
-def chen_cuda(X, multi_index):
+def coeff_chen_cuda(path, multi_index):
     """
     Computes the signature coefficient S(X)^{multi_index} using Chen's relation, computed with CUDA.
+    CUDA is used purely for comparability with coeff(x.cuda(), multi_index) and Chen's relation is run serially on one thread.
 
-    :param X: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
+    :param path: Underlying path. Should be a torch.Tensor of shape (path length, path dimension)
     :param multi_index: Array-like multi-index of signature coefficient to compute
     :return: double
     """
 
-    multi_index_ = list(multi_index)
-    new_X = reorder_path(X, multi_index_)
+    _multi_index = list(multi_index)
+    path_at_multi_index = reorder_path(path, _multi_index)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=NumbaPerformanceWarning)
-        res = chen_cuda_(new_X).cpu()
+        result = chen_cuda_(path_at_multi_index).cpu()
 
-    return float(res)
+    return float(result)

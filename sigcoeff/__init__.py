@@ -1,1 +1,1 @@
-from .sigcoeff import compute_coeff, cuda_serial, chen_cython, chen_cuda
+from .sigcoeff import coeff, coeff_cuda_serial, coeff_chen_cython, coeff_chen_cuda

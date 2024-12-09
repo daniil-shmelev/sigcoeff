@@ -23,7 +23,7 @@ if __name__ == '__main__':
     # Serial CPU computation
     #############################################
     start = time.time()
-    coeff = sigcoeff.compute_coeff(X, multi_index, M = M, dyadic_order = dyadic_order, parallel = False)
+    coeff = sigcoeff.coeff(X, multi_index, scaling_depth= M, dyadic_order = dyadic_order, parallel = False)
     end = time.time()
     print(f"{'Coefficient:':<15} {float(coeff):<10.4f} {'Time:':<10} {end - start:.4f}")
 
@@ -31,7 +31,7 @@ if __name__ == '__main__':
     # Parallel CPU computation
     #############################################
     start = time.time()
-    coeff = sigcoeff.compute_coeff(X, multi_index, M=M, dyadic_order=dyadic_order, parallel=True)
+    coeff = sigcoeff.coeff(X, multi_index, scaling_depth=M, dyadic_order=dyadic_order, parallel=True)
     end = time.time()
     print(f"{'Coefficient:':<15} {float(coeff):<10.4f} {'Time:':<10} {end - start:.4f}")
 
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     # Parallel GPU computation
     #############################################
     start = time.time()
-    coeff = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=dyadic_order)
+    coeff = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=dyadic_order)
     cuda.synchronize() # Wait for cuda to finish. For timing purposes only
     end = time.time()
     print(f"{'Coefficient:':<15} {float(coeff):<10.4f} {'Time:':<10} {end - start:.4f}")
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     # Varying dyadic orders for the two dimensions of the PDE grid
     #############################################
     start = time.time()
-    coeff = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=(3,2))
+    coeff = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=(3, 2))
     cuda.synchronize() # Wait for cuda to finish. For timing purposes only
     end = time.time()
     print(f"{'Coefficient:':<15} {float(coeff):<10.4f} {'Time:':<10} {end - start:.4f}")
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     # evaluated at all time points up to len_x. (CUDA only)
     #############################################
     start = time.time()
-    coeff_grid = sigcoeff.compute_coeff(X.cuda(), multi_index, M=M, dyadic_order=dyadic_order, full = True)
+    coeff_grid = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order=dyadic_order, full = True)
     cuda.synchronize() # Wait for cuda to finish. For timing purposes only
     end = time.time()
 
