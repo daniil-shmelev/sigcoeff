@@ -1,5 +1,10 @@
 <h1 align='center'>sigcoeff</h1>
-<h2 align='center'>Signature Coefficient Extraction via Kernels</h2>
+<h2 align='center'>Sparse Signature Coefficient Recovery via Kernels</h2>
+
+This package provides an example implementation for computing deep coefficients of the path signature transform using
+signature kernels on both CPU and GPU, to accompany the paper
+_[Sparse Signature Coefficient Recovery via Kernels](https://arxiv.org/abs/2412.08579)_. This method allows for 
+parallelised computation of coefficients, with a time complexity independent of their depth.
 
 ---
 
@@ -59,6 +64,15 @@ coeff_grid = sigcoeff.coeff(X.cuda(), multi_index, scaling_depth=M, dyadic_order
 ```
 
 ## Citation
+
+```bibtex
+@article{shmelev2024sparsesig,
+  title={Sparse Signature Coefficient Recovery via Kernels},
+  author={Shmelev, Daniil and Cristopher, Salvi},
+  journal={arXiv preprint arXiv:2412.08579},
+  year={2024}
+}
+```
 
 <!-- 
 -->
