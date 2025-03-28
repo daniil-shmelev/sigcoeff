@@ -24,6 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install setuptools wheel
           pip install Cython numba numpy
+      - name: Build Cython extensions
+        run: |
+          python setup.py build_ext --inplace
       - name: Build package
         run: |
           python setup.py sdist bdist_wheel  # Could also be python -m build
