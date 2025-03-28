@@ -29,6 +29,6 @@ jobs:
           python setup.py build_ext --inplace
       - name: Build package
         run: |
-          python setup.py sdist bdist_wheel  # Could also be python -m build
+          python -m build  #python setup.py sdist bdist_wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
