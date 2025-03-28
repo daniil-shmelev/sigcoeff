@@ -23,7 +23,7 @@ for e in ext_modules:
 setup(
     name="sigcoeff",
     version="1.0",
-    description="Discription of the package",
+    description="Sparse signature coefficient computations via kernels",
     packages=["sigcoeff"],
     long_description=long_description,
     long_description_content_type="text/markdown",
