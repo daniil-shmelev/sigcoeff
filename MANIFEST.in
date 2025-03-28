@@ -1,0 +1,6 @@
+include sigcoeff/*.pyx
+include sigcoeff/*.pxd
+include sigcoeff/*.c
+include sigcoeff/*.h
+include sigcoeff/*.so
+include sigcoeff/*.pyd

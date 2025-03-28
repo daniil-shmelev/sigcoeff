@@ -62,5 +62,7 @@ setup(
             "black",
         ],
     },
-    ext_modules=cythonize(ext_modules)
+    ext_modules=cythonize(ext_modules),
+    package_data = {"sigcoeff": ["*.pyx", "*.pxd", "*.so", "*.pyd"]},
+    include_package_data=True
 )
