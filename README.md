@@ -11,7 +11,7 @@ parallelised computation of coefficients, with a time complexity independent of 
 ## Installation
 
 ```bash
-pip install git+https://github.com/daniil-shmelev/sigcoeff.git
+pip install sigcoeff
 ```
 
 ## How to use the package
